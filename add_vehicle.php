@@ -4,44 +4,19 @@ include "db.php";
 $success_message = "";
 $error_message = "";
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
     try {
-        // Begin transaction
-        $conn->begin_transaction();
+        $stmt = $conn->prepare("INSERT INTO vehicles (vehicle_type, model, registration_no, status) VALUES (?, ?, ?, 'Available')");
+        $stmt->bind_param("sss", $_POST['type'], $_POST['model'], $_POST['reg']);
         
-        // Insert rental record
-        $stmt = $conn->prepare("INSERT INTO rentals (customer_id, vehicle_id, rental_days, total_cost, rental_date, payment_status) 
-                               VALUES (?, ?, ?, ?, CURDATE(), 'Pending')");
-        $stmt->bind_param("iiid", $_POST['customer'], $_POST['vehicle'], $_POST['days'], $_POST['cost']);
-        
-        if (!$stmt->execute()) {
-            throw new Exception("Error creating rental record: " . $stmt->error);
+        if ($stmt->execute()) {
+            $success_message = "Vehicle added successfully!";
+        } else {
+            $error_message = "Error adding vehicle. Please try again.";
         }
-        
-        // Update vehicle status
-        $update_stmt = $conn->prepare("UPDATE vehicles SET status = 'Rented' WHERE id = ?");
-        $update_stmt->bind_param("i", $_POST['vehicle']);
-        
-        if (!$update_stmt->execute()) {
-            throw new Exception("Error updating vehicle status: " . $update_stmt->error);
-        }
-        
-        // Commit transaction
-        $conn->commit();
-        $success_message = "Vehicle rented successfully!";
-        
     } catch (Exception $e) {
-        $conn->rollback();
-        $error_message = "Error processing rental: " . $e->getMessage();
+        $error_message = "Database error occurred. Please try again.";
     }
-}
-
-// Fetch available customers and vehicles
-try {
-    $customers = $conn->query("SELECT id, name, phone FROM customers ORDER BY name");
-    $vehicles = $conn->query("SELECT id, vehicle_type, model, registration_no FROM vehicles WHERE status = 'Available' ORDER BY vehicle_type, model");
-} catch (Exception $e) {
-    $error_message = "Database error: " . $e->getMessage();
 }
 ?>
 
@@ -50,7 +25,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rent Vehicle - Vehicle Rental Management</title>
+    <title>Add Vehicle - Vehicle Rental Management</title>
     <style>
         * {
             margin: 0;
@@ -151,7 +126,7 @@ try {
             font-size: 0.95rem;
         }
 
-        .form-input, .form-select {
+        .form-input {
             width: 100%;
             padding: 14px 16px;
             border: 2px solid #e2e8f0;
@@ -162,30 +137,20 @@ try {
             font-family: inherit;
         }
 
-        .form-input:focus, .form-select:focus {
+        .form-input:focus {
             outline: none;
             border-color: #667eea;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
             transform: translateY(-2px);
         }
 
-        .form-input:hover, .form-select:hover {
+        .form-input:hover {
             border-color: #cbd5e0;
         }
 
         .required::after {
             content: ' *';
             color: #e53e3e;
-        }
-
-        .customer-option, .vehicle-option {
-            padding: 8px;
-        }
-
-        .customer-details, .vehicle-details {
-            font-size: 0.85rem;
-            color: #718096;
-            margin-top: 2px;
         }
 
         .submit-btn {
@@ -283,8 +248,8 @@ try {
         <a href="index.php" class="back-link">Back to Dashboard</a>
         
         <div class="header">
-            <h1>Rent a Vehicle</h1>
-            <p>Create a new rental agreement for a customer</p>
+            <h1>Add New Vehicle</h1>
+            <p>Register a new vehicle in the rental management system</p>
         </div>
 
         <?php if (!empty($success_message)): ?>
@@ -302,73 +267,58 @@ try {
         <div class="form-container">
             <form method="post" novalidate>
                 <div class="form-group">
-                    <label for="customer" class="form-label required">Customer</label>
-                    <select id="customer" name="customer" class="form-select" required>
-                        <?php while($c = $customers->fetch_assoc()): ?>
-                            <option value="<?php echo $c['id']; ?>" class="customer-option">
-                                <?php echo htmlspecialchars($c['name']); ?>
-                                <div class="customer-details"><?php echo htmlspecialchars($c['phone']); ?></div>
-                            </option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="vehicle" class="form-label required">Vehicle</label>
-                    <select id="vehicle" name="vehicle" class="form-select" required>
-                        <?php while($v = $vehicles->fetch_assoc()): ?>
-                            <option value="<?php echo $v['id']; ?>" class="vehicle-option">
-                                <?php echo htmlspecialchars($v['vehicle_type'] . ' - ' . $v['model']); ?>
-                                <div class="vehicle-details"><?php echo htmlspecialchars($v['registration_no']); ?></div>
-                            </option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="days" class="form-label required">Rental Days</label>
+                    <label for="type" class="form-label required">Vehicle Type</label>
                     <input 
-                        type="number" 
-                        id="days" 
-                        name="days" 
+                        type="text" 
+                        id="type" 
+                        name="type" 
                         class="form-input" 
-                        placeholder="Enter number of rental days"
-                        min="1"
-                        max="365"
+                        placeholder="Enter vehicle type (e.g., Sedan, SUV)"
                         required
-                        value="<?php echo isset($_POST['days']) ? htmlspecialchars($_POST['days']) : ''; ?>"
+                        value="<?php echo isset($_POST['type']) ? htmlspecialchars($_POST['type']) : ''; ?>"
                     >
                 </div>
 
                 <div class="form-group">
-                    <label for="cost" class="form-label required">Total Cost</label>
+                    <label for="model" class="form-label required">Model</label>
                     <input 
-                        type="number" 
-                        id="cost" 
-                        name="cost" 
+                        type="text" 
+                        id="model" 
+                        name="model" 
                         class="form-input" 
-                        placeholder="Enter total rental cost"
-                        min="0"
-                        step="0.01"
+                        placeholder="Enter vehicle model"
                         required
-                        value="<?php echo isset($_POST['cost']) ? htmlspecialchars($_POST['cost']) : ''; ?>"
+                        value="<?php echo isset($_POST['model']) ? htmlspecialchars($_POST['model']) : ''; ?>"
                     >
                 </div>
 
-                <button type="submit" class="submit-btn">Create Rental Agreement</button>
+                <div class="form-group">
+                    <label for="reg" class="form-label required">Registration Number</label>
+                    <input 
+                        type="text" 
+                        id="reg" 
+                        name="reg" 
+                        class="form-input" 
+                        placeholder="Enter registration number"
+                        required
+                        value="<?php echo isset($_POST['reg']) ? htmlspecialchars($_POST['reg']) : ''; ?>"
+                    >
+                </div>
+
+                <button type="submit" class="submit-btn">Add Vehicle</button>
             </form>
         </div>
 
         <div class="form-footer">
-            <p>All required fields must be completed to rent a vehicle</p>
+            <p>All required fields must be completed to register a new vehicle</p>
         </div>
     </div>
 
     <script>
+        // Enhanced form validation and UX
         document.addEventListener('DOMContentLoaded', function() {
-            // Enhanced form validation
             const form = document.querySelector('form');
-            const inputs = document.querySelectorAll('.form-input, .form-select');
+            const inputs = document.querySelectorAll('.form-input');
             
             // Add real-time validation feedback
             inputs.forEach(input => {
@@ -397,18 +347,10 @@ try {
                     return false;
                 }
                 
-                // Validate number fields
-                if (field.type === 'number') {
-                    const min = field.getAttribute('min');
-                    const max = field.getAttribute('max');
-                    
-                    if (min && parseFloat(value) < parseFloat(min)) {
-                        field.style.borderColor = '#e53e3e';
-                        field.classList.add('error');
-                        return false;
-                    }
-                    
-                    if (max && parseFloat(value) > parseFloat(max)) {
+                // Validate registration number format (basic check)
+                if (field.name === 'reg' && value) {
+                    const regRegex = /^[A-Z0-9]{6,12}$/i;
+                    if (!regRegex.test(value)) {
                         field.style.borderColor = '#e53e3e';
                         field.classList.add('error');
                         return false;
@@ -433,7 +375,7 @@ try {
                     e.preventDefault();
                     
                     // Show validation message
-                    const firstError = document.querySelector('.form-input.error, .form-select.error');
+                    const firstError = document.querySelector('.form-input.error');
                     if (firstError) {
                         firstError.focus();
                     }

@@ -3,43 +3,49 @@ include "db.php";
 
 $success_message = "";
 $error_message = "";
+$payment_methods = ['Cash', 'Credit Card', 'Debit Card', 'Bank Transfer', 'Check', 'Mobile Payment'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         // Begin transaction
         $conn->begin_transaction();
         
-        // Insert rental record
-        $stmt = $conn->prepare("INSERT INTO rentals (customer_id, vehicle_id, rental_days, total_cost, rental_date, payment_status) 
-                               VALUES (?, ?, ?, ?, CURDATE(), 'Pending')");
-        $stmt->bind_param("iiid", $_POST['customer'], $_POST['vehicle'], $_POST['days'], $_POST['cost']);
+        // Insert payment record
+        $stmt = $conn->prepare("INSERT INTO payments (rental_id, amount, payment_date, payment_method, status) 
+                               VALUES (?, ?, ?, ?, 'Success')");
+        $stmt->bind_param("idss", 
+            $_POST['rental'], 
+            $_POST['amount'], 
+            $_POST['date'], 
+            $_POST['method']
+        );
         
         if (!$stmt->execute()) {
-            throw new Exception("Error creating rental record: " . $stmt->error);
+            throw new Exception("Error creating payment record: " . $stmt->error);
         }
         
-        // Update vehicle status
-        $update_stmt = $conn->prepare("UPDATE vehicles SET status = 'Rented' WHERE id = ?");
-        $update_stmt->bind_param("i", $_POST['vehicle']);
-        
-        if (!$update_stmt->execute()) {
-            throw new Exception("Error updating vehicle status: " . $update_stmt->error);
-        }
+        // Update rental payment status if full amount paid
+        $update_stmt = $conn->prepare("UPDATE rentals SET payment_status = 'Paid' 
+                                     WHERE id = ? AND total_cost <= (SELECT SUM(amount) FROM payments WHERE rental_id = ?)");
+        $update_stmt->bind_param("ii", $_POST['rental'], $_POST['rental']);
+        $update_stmt->execute();
         
         // Commit transaction
         $conn->commit();
-        $success_message = "Vehicle rented successfully!";
+        $success_message = "Payment recorded successfully!";
         
     } catch (Exception $e) {
         $conn->rollback();
-        $error_message = "Error processing rental: " . $e->getMessage();
+        $error_message = "Error processing payment: " . $e->getMessage();
     }
 }
 
-// Fetch available customers and vehicles
+// Fetch all rentals with customer info
 try {
-    $customers = $conn->query("SELECT id, name, phone FROM customers ORDER BY name");
-    $vehicles = $conn->query("SELECT id, vehicle_type, model, registration_no FROM vehicles WHERE status = 'Available' ORDER BY vehicle_type, model");
+    $rentals = $conn->query("SELECT r.id, c.name, r.total_cost, r.payment_status 
+                           FROM rentals r 
+                           JOIN customers c ON r.customer_id = c.id 
+                           ORDER BY r.rental_date DESC");
 } catch (Exception $e) {
     $error_message = "Database error: " . $e->getMessage();
 }
@@ -50,7 +56,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rent Vehicle - Vehicle Rental Management</title>
+    <title>Record Payment - Vehicle Rental Management</title>
     <style>
         * {
             margin: 0;
@@ -178,14 +184,33 @@ try {
             color: #e53e3e;
         }
 
-        .customer-option, .vehicle-option {
+        .rental-option {
             padding: 8px;
         }
 
-        .customer-details, .vehicle-details {
+        .rental-details {
             font-size: 0.85rem;
             color: #718096;
             margin-top: 2px;
+        }
+
+        .payment-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+
+        .status-pending {
+            background-color: #feebc8;
+            color: #7b341e;
+        }
+
+        .status-paid {
+            background-color: #c6f6d5;
+            color: #22543d;
         }
 
         .submit-btn {
@@ -283,8 +308,8 @@ try {
         <a href="index.php" class="back-link">Back to Dashboard</a>
         
         <div class="header">
-            <h1>Rent a Vehicle</h1>
-            <p>Create a new rental agreement for a customer</p>
+            <h1>Record Payment</h1>
+            <p>Add payment for rental agreements</p>
         </div>
 
         <?php if (!empty($success_message)): ?>
@@ -302,65 +327,66 @@ try {
         <div class="form-container">
             <form method="post" novalidate>
                 <div class="form-group">
-                    <label for="customer" class="form-label required">Customer</label>
-                    <select id="customer" name="customer" class="form-select" required>
-                        <?php while($c = $customers->fetch_assoc()): ?>
-                            <option value="<?php echo $c['id']; ?>" class="customer-option">
-                                <?php echo htmlspecialchars($c['name']); ?>
-                                <div class="customer-details"><?php echo htmlspecialchars($c['phone']); ?></div>
+                    <label for="rental" class="form-label required">Rental Agreement</label>
+                    <select id="rental" name="rental" class="form-select" required>
+                        <?php while($r = $rentals->fetch_assoc()): ?>
+                            <option value="<?php echo $r['id']; ?>" class="rental-option">
+                                Rental #<?php echo $r['id']; ?> - <?php echo htmlspecialchars($r['name']); ?>
+                                <div class="rental-details">
+                                    Total: $<?php echo number_format($r['total_cost'], 2); ?>
+                                    <span class="payment-status status-<?php echo strtolower($r['payment_status']); ?>">
+                                        <?php echo $r['payment_status']; ?>
+                                    </span>
+                                </div>
                             </option>
                         <?php endwhile; ?>
                     </select>
                 </div>
 
                 <div class="form-group">
-                    <label for="vehicle" class="form-label required">Vehicle</label>
-                    <select id="vehicle" name="vehicle" class="form-select" required>
-                        <?php while($v = $vehicles->fetch_assoc()): ?>
-                            <option value="<?php echo $v['id']; ?>" class="vehicle-option">
-                                <?php echo htmlspecialchars($v['vehicle_type'] . ' - ' . $v['model']); ?>
-                                <div class="vehicle-details"><?php echo htmlspecialchars($v['registration_no']); ?></div>
-                            </option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="days" class="form-label required">Rental Days</label>
+                    <label for="amount" class="form-label required">Amount</label>
                     <input 
                         type="number" 
-                        id="days" 
-                        name="days" 
+                        id="amount" 
+                        name="amount" 
                         class="form-input" 
-                        placeholder="Enter number of rental days"
-                        min="1"
-                        max="365"
-                        required
-                        value="<?php echo isset($_POST['days']) ? htmlspecialchars($_POST['days']) : ''; ?>"
-                    >
-                </div>
-
-                <div class="form-group">
-                    <label for="cost" class="form-label required">Total Cost</label>
-                    <input 
-                        type="number" 
-                        id="cost" 
-                        name="cost" 
-                        class="form-input" 
-                        placeholder="Enter total rental cost"
-                        min="0"
+                        placeholder="Enter payment amount"
+                        min="0.01"
                         step="0.01"
                         required
-                        value="<?php echo isset($_POST['cost']) ? htmlspecialchars($_POST['cost']) : ''; ?>"
+                        value="<?php echo isset($_POST['amount']) ? htmlspecialchars($_POST['amount']) : ''; ?>"
                     >
                 </div>
 
-                <button type="submit" class="submit-btn">Create Rental Agreement</button>
+                <div class="form-group">
+                    <label for="date" class="form-label required">Payment Date</label>
+                    <input 
+                        type="date" 
+                        id="date" 
+                        name="date" 
+                        class="form-input" 
+                        required
+                        value="<?php echo isset($_POST['date']) ? htmlspecialchars($_POST['date']) : date('Y-m-d'); ?>"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="method" class="form-label required">Payment Method</label>
+                    <select id="method" name="method" class="form-select" required>
+                        <?php foreach ($payment_methods as $method): ?>
+                            <option value="<?php echo htmlspecialchars($method); ?>">
+                                <?php echo htmlspecialchars($method); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <button type="submit" class="submit-btn">Record Payment</button>
             </form>
         </div>
 
         <div class="form-footer">
-            <p>All required fields must be completed to rent a vehicle</p>
+            <p>All required fields must be completed to record a payment</p>
         </div>
     </div>
 
@@ -400,15 +426,20 @@ try {
                 // Validate number fields
                 if (field.type === 'number') {
                     const min = field.getAttribute('min');
-                    const max = field.getAttribute('max');
                     
                     if (min && parseFloat(value) < parseFloat(min)) {
                         field.style.borderColor = '#e53e3e';
                         field.classList.add('error');
                         return false;
                     }
+                }
+                
+                // Validate date fields
+                if (field.type === 'date') {
+                    const selectedDate = new Date(value);
+                    const today = new Date();
                     
-                    if (max && parseFloat(value) > parseFloat(max)) {
+                    if (selectedDate > today) {
                         field.style.borderColor = '#e53e3e';
                         field.classList.add('error');
                         return false;

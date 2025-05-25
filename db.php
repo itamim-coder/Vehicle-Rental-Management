@@ -1,9 +1,14 @@
 <?php
-$host = 'localhost';
-$user = 'root';
-$pass = '';
-$db = 'vehicle_rental';
+$servername = "localhost";
+$username = "root";
+$password = "";
+$dbname = "vehicle_rental";
 
-$conn = new mysqli($host, $user, $pass, $db);
-if ($conn->connect_error) die("Connection failed: " . $conn->connect_error);
+// Create connection
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+// Check connection
+if ($conn->connect_error) {
+  die("Connection failed: " . $conn->connect_error);
+}
 ?>
